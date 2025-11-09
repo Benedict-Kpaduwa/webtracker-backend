@@ -24,14 +24,59 @@ app.use("/stats", statsRoutes);
 app.use("/admin", adminRoutes);
 
 app.get("/health", (_, res) => res.json({ ok: true, ts: Date.now() }));
-
 app.get("/", (_, res) => res.json({ message: "WebTracker API is running" }));
 
-mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log("MongoDB connected"))
-    .catch(err => {
-        console.error("MongoDB error:", err);
-        process.exit(1);
-    });
+let isConnected = false;
+
+const connectDB = async () => {
+    if (isConnected) {
+        console.log('Using existing MongoDB connection');
+        return;
+    }
+
+    try {
+        if (mongoose.connection.readyState !== 0) {
+            await mongoose.connection.close();
+        }
+
+        await mongoose.connect(process.env.MONGO_URI, {
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+            maxPoolSize: 10,
+            minPoolSize: 1,
+        });
+
+        isConnected = mongoose.connection.readyState === 1;
+        console.log('MongoDB connected successfully');
+
+        mongoose.connection.on('error', (err) => {
+            console.error('MongoDB connection error:', err);
+            isConnected = false;
+        });
+
+        mongoose.connection.on('disconnected', () => {
+            console.log('MongoDB disconnected');
+            isConnected = false;
+        });
+
+    } catch (error) {
+        console.error('MongoDB connection failed:', error);
+        isConnected = false;
+    }
+};
+
+connectDB();
+
+app.get('/db-health', async (_, res) => {
+    try {
+        const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+        res.json({
+            database: dbStatus,
+            timestamp: Date.now()
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Database health check failed' });
+    }
+});
 
 export default app;
