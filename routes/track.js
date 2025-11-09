@@ -1,4 +1,5 @@
 import express from "express";
+import mongoose from "mongoose";
 import TrackingEvent from "../models/TrackingEvent.js";
 import Visitor from "../models/Visitor.js";
 import geoip from "geoip-lite";
@@ -15,8 +16,46 @@ const limiter = rateLimit({
 
 router.use(limiter);
 
-router.post("/", async (req, res) => {
+const ensureConnection = async () => {
+  if (mongoose.connection.readyState === 1) {
+    return true; // Already connected
+  }
+
   try {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.connection.close();
+    }
+
+    await mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 8000, // 8 second timeout
+      socketTimeoutMS: 45000,
+      maxPoolSize: 5,
+      minPoolSize: 1,
+      bufferCommands: false,
+      bufferMaxEntries: 0
+    });
+
+    console.log('MongoDB reconnected successfully');
+    return true;
+  } catch (error) {
+    console.error('MongoDB connection failed:', error);
+    return false;
+  }
+};
+
+router.post("/", async (req, res) => {
+  let connectionEstablished = false;
+
+  try {
+    connectionEstablished = await ensureConnection();
+
+    if (!connectionEstablished) {
+      return res.status(503).json({
+        error: "Service temporarily unavailable",
+        details: "Database connection failed"
+      });
+    }
+
     const ipFromHeaders = req.headers["x-forwarded-for"]?.split(",")[0]?.trim()
       || req.socket?.remoteAddress || req.ip || null;
     const {
@@ -31,37 +70,82 @@ router.post("/", async (req, res) => {
     const ip = req.body.ip || ipFromHeaders || null;
     const geo = ip ? geoip.lookup(ip) : null;
 
-    const event = await TrackingEvent.create({
-      visitorId,
-      sessionId,
-      page,
-      type,
-      payload,
-      ip,
-      userAgent,
-      geo
-    });
+    const event = await Promise.race([
+      TrackingEvent.create({
+        visitorId,
+        sessionId,
+        page,
+        type,
+        payload,
+        ip,
+        userAgent,
+        geo
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Database operation timeout')), 8000)
+      )
+    ]);
 
     if (visitorId) {
-      const update = {
-        lastSeen: new Date(),
-        lastIp: ip,
-        userAgent,
-        $inc: { eventsCount: 1 }
-      };
-      if (req.body.metadata) update.metadata = req.body.metadata;
-
-      await Visitor.findOneAndUpdate(
-        { visitorId },
-        { $set: { lastSeen: update.lastSeen, lastIp: update.lastIp, userAgent: update.userAgent, metadata: req.body.metadata || {} }, $inc: { eventsCount: 1 } },
-        { upsert: true, new: true }
-      );
+      try {
+        await Promise.race([
+          Visitor.findOneAndUpdate(
+            { visitorId },
+            {
+              $set: {
+                lastSeen: new Date(),
+                lastIp: ip,
+                userAgent,
+                metadata: req.body.metadata || {}
+              },
+              $inc: { eventsCount: 1 }
+            },
+            { upsert: true, new: true }
+          ),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Visitor update timeout')), 5000)
+          )
+        ]);
+      } catch (visitorError) {
+        console.warn('Visitor update failed:', visitorError.message);
+      }
     }
 
     res.status(201).json({ ok: true, id: event._id });
+
   } catch (err) {
     console.error("Track error:", err);
-    res.status(500).json({ error: "could not save tracking event", details: err.message });
+
+    if (err.name === 'MongoServerSelectionError' ||
+      err.name === 'MongoNetworkError' ||
+      err.message === 'Database operation timeout' ||
+      !connectionEstablished) {
+      return res.status(503).json({
+        error: "Service temporarily unavailable",
+        details: "Database connection issue"
+      });
+    }
+
+    res.status(500).json({
+      error: "could not save tracking event",
+      details: err.message
+    });
+  }
+});
+
+router.get("/health", async (req, res) => {
+  try {
+    const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+    res.json({
+      status: 'ok',
+      database: dbStatus,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      error: error.message
+    });
   }
 });
 
