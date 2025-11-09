@@ -1,4 +1,4 @@
-import app from "./index.js";
+import app from "./api/index.js";
 
-const PORT = process.env.PORT || 4000;
+const PORT = 2000;
 app.listen(PORT, () => console.log(`Server running locally on ${PORT}`));

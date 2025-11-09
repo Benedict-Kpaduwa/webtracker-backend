@@ -5,10 +5,10 @@ import dotenv from "dotenv";
 import morgan from "morgan";
 import helmet from "helmet";
 
-import trackRoutes from "./routes/track.js";
-import visitorRoutes from "./routes/visitor.js";
-import statsRoutes from "./routes/stats.js";
-import adminRoutes from "./routes/admin.js";
+import trackRoutes from "../routes/track.js";
+import visitorRoutes from "../routes/visitor.js";
+import statsRoutes from "../routes/stats.js";
+import adminRoutes from "../routes/admin.js";
 
 dotenv.config();
 const app = express();
