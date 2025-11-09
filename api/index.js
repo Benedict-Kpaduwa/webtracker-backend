@@ -25,6 +25,8 @@ app.use("/admin", adminRoutes);
 
 app.get("/health", (_, res) => res.json({ ok: true, ts: Date.now() }));
 
+app.get("/", (_, res) => res.json({ message: "WebTracker API is running" }));
+
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("MongoDB connected"))
     .catch(err => {
