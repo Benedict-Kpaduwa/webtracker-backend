@@ -59,6 +59,20 @@ router.get("/dashboard", adminAuth, async (req, res) => {
   }
 });
 
+router.get("/visitors", adminAuth, async (req, res) => {
+  try {
+    const visitors = await Visitor.find({})
+      .sort({ lastSeen: -1 })
+      .select("-__v");
+
+    console.log("Fetched visitors:", visitors.length);
+    res.json(visitors);
+  } catch (error) {
+    console.error("Error fetching visitors:", error);
+    res.status(500).json({ error: "Failed to fetch visitors" });
+  }
+});
+
 router.post("/login", limiter, async (req, res) => {
   try {
     const { username, password } = req.body;

@@ -18,7 +18,7 @@ router.use(limiter);
 
 const ensureConnection = async () => {
   if (mongoose.connection.readyState === 1) {
-    return true; // Already connected
+    return true;
   }
 
   try {
